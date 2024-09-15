@@ -1,0 +1,11 @@
+<h2 mat-dialog-title>Edit {{data.column}}:</h2>
+<mat-dialog-content>
+  <mat-form-field>
+    <mat-label>Enter {{data.column}}</mat-label>
+    <input matInput [(ngModel)]="value" />
+  </mat-form-field>
+</mat-dialog-content>
+<mat-dialog-actions>
+  <button mat-button (click)="onCancelClick()">Cancel</button>
+  <button mat-button [mat-dialog-close]="value()" cdkFocusInitial>Save</button>
+</mat-dialog-actions>

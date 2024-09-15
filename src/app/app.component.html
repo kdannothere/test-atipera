@@ -1,3 +1,75 @@
 <main class="main">
+  <form [formGroup]="filterForm">
+    <mat-form-field>
+      <mat-label>Filter</mat-label>
+      <input formControlName="filterValue" matInput />
+    </mat-form-field>
+  </form>
+  @if((dataFiltered | async)){
+  <table mat-table [dataSource]="dataFiltered" class="mat-elevation-z8">
+    <!-- Position Column -->
+    <ng-container matColumnDef="{{ columns.position }}">
+      <th
+        mat-header-cell
+        *matHeaderCellDef
+        [ngStyle]="{ width: columnWidth }"
+      >
+        No.
+      </th>
+
+      <td
+        (click)="openEditDialog(columns.position, element)"
+        mat-cell
+        *matCellDef="let element"
+      >
+        {{ element.position }}
+      </td>
+    </ng-container>
+
+    <!-- Name Column -->
+    <ng-container matColumnDef="{{ columns.name }}">
+      <th mat-header-cell *matHeaderCellDef>Name</th>
+      <td
+        (click)="openEditDialog(columns.name, element)"
+        mat-cell
+        *matCellDef="let element"
+        [ngStyle]="{ width: columnWidth }"
+      >
+        {{ element.name }}
+      </td>
+    </ng-container>
+
+    <!-- Weight Column -->
+    <ng-container matColumnDef="{{ columns.weight }}">
+      <th mat-header-cell *matHeaderCellDef>Weight</th>
+      <td
+        (click)="openEditDialog(columns.weight, element)"
+        mat-cell
+        *matCellDef="let element"
+        [ngStyle]="{ width: columnWidth }"
+      >
+        {{ element.weight }}
+      </td>
+    </ng-container>
+
+    <!-- Symbol Column -->
+    <ng-container matColumnDef="{{ columns.symbol }}">
+      <th mat-header-cell *matHeaderCellDef>Symbol</th>
+      <td
+        (click)="openEditDialog(columns.symbol, element)"
+        mat-cell
+        *matCellDef="let element"
+        [ngStyle]="{ width: columnWidth }"
+      >
+        {{ element.symbol }}
+      </td>
+    </ng-container>
+
+    <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+    <tr mat-row *matRowDef="let row; columns: displayedColumns"></tr>
+  </table>
+
+  }
+
   <router-outlet />
 </main>

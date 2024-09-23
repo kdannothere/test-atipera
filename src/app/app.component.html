@@ -5,8 +5,8 @@
       <input formControlName="filterValue" matInput />
     </mat-form-field>
   </form>
-  @if((dataFiltered | async)){
-  <table mat-table [dataSource]="dataFiltered" class="mat-elevation-z8">
+  @if((data$ | async)){
+  <table mat-table [dataSource]="filteredData$" class="mat-elevation-z8">
     <!-- Position Column -->
     <ng-container matColumnDef="{{ columns.position }}">
       <th

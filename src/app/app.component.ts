@@ -1,17 +1,18 @@
-import { Component, inject, OnDestroy, OnInit, signal } from '@angular/core';
+import { Component, inject, OnInit, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { MatTableModule } from '@angular/material/table';
 import { FormBuilder, FormControl, ReactiveFormsModule } from '@angular/forms';
 import { MatInput } from '@angular/material/input';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import {
+  BehaviorSubject,
+  combineLatest,
   debounceTime,
+  distinctUntilChanged,
   first,
   map,
+  Observable,
   of,
-  Subject,
-  Subscription,
-  takeUntil,
 } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { MatDialog } from '@angular/material/dialog';
@@ -19,6 +20,9 @@ import {
   DialogData,
   EditDialogComponent,
 } from './edit-dialog/edit-dialog.component';
+import { rxState } from '@rx-angular/state';
+import { RxFor } from '@rx-angular/template/for';
+import { columns } from './columns';
 
 export interface PeriodicElement {
   name: string;
@@ -44,6 +48,7 @@ const ELEMENT_DATA: PeriodicElement[] = [
   selector: 'app-root',
   standalone: true,
   imports: [
+    RxFor,
     RouterOutlet,
     CommonModule,
     MatTableModule,
@@ -54,93 +59,90 @@ const ELEMENT_DATA: PeriodicElement[] = [
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss',
 })
-export class AppComponent implements OnInit, OnDestroy {
-  constructor(private formBuilder: FormBuilder) {
-    this.filterForm = this.getFilterForm();
-
-    // filter elements after 2 seconds
-    // since the last input change
-    this.inputSubscription = this.filterForm.valueChanges
-      .pipe(
-        debounceTime(2000), // 2 seconds
-        takeUntil(this.destroy$)
-      )
-      .subscribe({
-        next: (_) => {
-          try {
-            this.filter();
-          } catch (error) {
-            console.error('Error in filter function:', error);
-            this.inputSubscription.unsubscribe();
-          }
-        },
-        error: (error) => {
-          console.error('Error in input subscription:', error);
-          this.inputSubscription.unsubscribe();
-          alert('Error occured, please reload this page.');
-        },
-      });
-  }
-
-  ngOnInit() {
-    this.defineDisplayedColumns();
-    this.calculateColumnWidth();
-  }
-
-  ngOnDestroy() {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
+export class AppComponent implements OnInit {
   title = 'test-atipera';
   filterForm;
+  columns = columns;
 
-  private destroy$ = new Subject<void>();
-  private inputSubscription!: Subscription;
+  loadDataSource(): Observable<PeriodicElement[]> {
+    return of(ELEMENT_DATA).pipe(first());
+  }
 
-  columns = {
-    position: 'position',
-    name: 'name',
-    weight: 'weight',
-    symbol: 'symbol',
-  };
+  private filterSubject = new BehaviorSubject<string>('');
+  filter$ = this.filterSubject.asObservable().pipe(distinctUntilChanged());
+
+  private state = rxState<{
+    data: PeriodicElement[];
+    filterValue: string;
+  }>(({ set, connect }) => {
+    set({
+      data: [],
+      filterValue: '',
+    });
+    connect('data', this.loadDataSource());
+  });
+
+  data$ = this.state.select('data');
+  filterValue = this.state.signal('filterValue');
+  data = this.state.signal('data');
 
   displayedColumns!: string[];
 
   private defineDisplayedColumns() {
     this.displayedColumns = [
-      this.columns.position,
-      this.columns.name,
-      this.columns.weight,
-      this.columns.symbol,
+      columns.position,
+      columns.name,
+      columns.weight,
+      columns.symbol,
     ];
   }
 
   columnWidth!: string;
 
-  private calculateColumnWidth() {
-    this.columnWidth = 100 / this.displayedColumns.length + '%';
-  }
-
-  dataSource: PeriodicElement[] = ELEMENT_DATA;
-  dataFiltered = of(this.dataSource).pipe(first());
-
   readonly value = signal<string | number>('');
   readonly dialog = inject(MatDialog);
   isDialogOpen = false;
 
-  private getFilterForm() {
-    return this.formBuilder.group({
-      filterValue: new FormControl(''),
-    });
+  applyFilter(filterValue: string) {
+    this.filterSubject.next(filterValue);
+  }
+
+  filteredData$ = combineLatest([this.data$, this.filter$]).pipe(
+    map(([data, filter]) =>
+      data.filter(
+        (element) =>
+          element.name.toLowerCase().includes(filter.toLowerCase()) ||
+          element.symbol.toLowerCase().includes(filter.toLowerCase()) ||
+          element.weight.toString().includes(filter) ||
+          element.position.toString().includes(filter)
+      )
+    )
+  );
+
+  constructor(private formBuilder: FormBuilder) {
+    this.filterForm = this.getFilterForm();
+  }
+
+  ngOnInit() {
+    this.defineDisplayedColumns();
+    this.calculateColumnWidth();
+    this.filterForm.valueChanges
+      .pipe(debounceTime(2000), distinctUntilChanged())
+      .subscribe((value) => {
+        if (value.filterValue || value.filterValue === '')
+          this.state.set(
+            'filterValue',
+            (state) => (state.filterValue = value.filterValue as string)
+          );
+        this.applyFilter(this.filterValue());
+      });
   }
 
   openEditDialog(column: string, element: PeriodicElement): void {
     if (this.isDialogOpen) return;
     this.isDialogOpen = true;
-    const value = this.getElementPropertyByColumnName(element, column);
-    if (value === undefined) return;
-    const data: DialogData = { column: column, value: value };
+    const data: DialogData = { element: element, column: column };
+    const currentElement = element;
     const dialogRef = this.dialog.open(EditDialogComponent, {
       data: data,
     });
@@ -150,74 +152,69 @@ export class AppComponent implements OnInit, OnDestroy {
       .subscribe((newValue) => {
         // using underfined because the value can be empty
         if (newValue !== undefined) {
-          this.setElementPropertyByColumnName(element, column, newValue);
+          this.updateValueByColumn(currentElement, column, newValue);
         }
         this.isDialogOpen = false;
       });
   }
 
-  private filter() {
-    const text =
-      this.filterForm.controls.filterValue.value?.toLowerCase() || '';
-    this.dataFiltered = of(this.dataSource).pipe(
-      map((data) =>
-        data.filter(
-          (element: PeriodicElement) =>
-            element.name.toLowerCase().includes(text) ||
-            element.position.toString().toLowerCase().includes(text) ||
-            element.symbol.toLowerCase().includes(text) ||
-            element.weight.toString().toLowerCase().includes(text)
-        )
-      ),
-      first()
+  private updateElement(
+    position: number,
+    newName: string,
+    newWeight: number,
+    newSymbol: string
+  ) {
+    this.state.set('data', (data) =>
+      data.data.map((element) =>
+        element.position === position
+          ? { ...element, name: newName, weight: newWeight, symbol: newSymbol }
+          : element
+      )
     );
   }
 
-  private getElementPropertyByColumnName(
+  private updateValueByColumn(
     element: PeriodicElement,
-    columnName: string
-  ): string | number | undefined {
-    const key = Object.keys(this.columns).find(
-      (key) => this.columns[key as keyof typeof this.columns] === columnName
-    );
-    if (!key) alert('Error, column "${columnName}" does not exist. ');
-    return key ? element[key as keyof PeriodicElement] : undefined;
-  }
-
-  private setElementPropertyByColumnName(
-    element: PeriodicElement,
-    columnName: string,
-    newValue: string | number
-  ): void {
-    const key = Object.keys(this.columns).find(
-      (key) => this.columns[key as keyof typeof this.columns] === columnName
-    );
-    if (key) {
-      // if value should be a number
-      const oldValue: string | number = element[key as keyof PeriodicElement];
-      if (typeof oldValue === 'number') {
-        // show message that the value is not a number
-        if (isNaN(Number(newValue))) {
-          alert('Error, this field should contain a number, not a text. ');
-          return;
-        }
-        // value is a number
-        (element[key as keyof PeriodicElement] as number) = Number(newValue);
-        return;
-      }
-
-      // if value should be a string
-      if (typeof oldValue === 'string' && typeof newValue === 'string') {
-        (element[key as keyof PeriodicElement] as string) = newValue;
-        return;
-      }
-      console.error(
-        'Error in setElementPropertyByColumnName function: wrong input data type.'
+    column: string,
+    value: number | string
+  ) {
+    if (column === columns.name)
+      this.updateElement(
+        element.position,
+        value as string,
+        element.weight,
+        element.symbol
       );
-      alert('Wrong input, please try again.');
-      return;
-    }
-    // column not found
-    alert('Error, column "${columnName}" does not exist. ');
+    if (column === columns.position)
+      this.updateElement(
+        value as number,
+        element.name,
+        element.weight,
+        element.symbol
+      );
+    if (column === columns.symbol)
+      this.updateElement(
+        element.position,
+        element.name,
+        element.weight,
+        value as string
+      );
+    if (column === columns.weight)
+      this.updateElement(
+        element.position,
+        element.name,
+        value as number,
+        element.symbol
+      );
+  }
+
+  private getFilterForm() {
+    return this.formBuilder.group({
+      filterValue: new FormControl(''),
+    });
+  }
+
+  private calculateColumnWidth() {
+    this.columnWidth = 100 / this.displayedColumns.length + '%';
   }
 }
